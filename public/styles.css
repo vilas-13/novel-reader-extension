@@ -63,6 +63,66 @@
   --nr-border:  rgba(139,94,60,0.15);
   --nr-shadow:  rgba(59,42,26,0.18);
 }
+/* AMOLED — pure black for OLED screens */
+#nr-overlay[data-theme="amoled"] {
+  --nr-bg:      #000000;
+  --nr-surface: #0d0d0d;
+  --nr-text:    #e8e8e8;
+  --nr-muted:   #555;
+  --nr-accent:  #7c6fef;
+  --nr-border:  rgba(255,255,255,0.05);
+  --nr-shadow:  rgba(0,0,0,0.9);
+}
+/* Midnight — deep navy blue */
+#nr-overlay[data-theme="midnight"] {
+  --nr-bg:      #0b0f1a;
+  --nr-surface: #131929;
+  --nr-text:    #cdd6f4;
+  --nr-muted:   #5a6a8a;
+  --nr-accent:  #89b4fa;
+  --nr-border:  rgba(137,180,250,0.08);
+  --nr-shadow:  rgba(0,0,0,0.7);
+}
+/* Forest — dark green */
+#nr-overlay[data-theme="forest"] {
+  --nr-bg:      #0d1a0f;
+  --nr-surface: #142016;
+  --nr-text:    #d4e8d0;
+  --nr-muted:   #4d7a52;
+  --nr-accent:  #7ac47e;
+  --nr-border:  rgba(122,196,126,0.08);
+  --nr-shadow:  rgba(0,0,0,0.65);
+}
+/* Ocean — deep teal */
+#nr-overlay[data-theme="ocean"] {
+  --nr-bg:      #07141e;
+  --nr-surface: #0e1f2e;
+  --nr-text:    #c8dff0;
+  --nr-muted:   #3d6a83;
+  --nr-accent:  #38bdf8;
+  --nr-border:  rgba(56,189,248,0.08);
+  --nr-shadow:  rgba(0,0,0,0.7);
+}
+/* Rose — warm blush */
+#nr-overlay[data-theme="rose"] {
+  --nr-bg:      #1e1014;
+  --nr-surface: #2a1520;
+  --nr-text:    #f0d8e0;
+  --nr-muted:   #7a4a58;
+  --nr-accent:  #f08fa8;
+  --nr-border:  rgba(240,143,168,0.08);
+  --nr-shadow:  rgba(0,0,0,0.65);
+}
+/* Dusk — warm amber/brown */
+#nr-overlay[data-theme="dusk"] {
+  --nr-bg:      #1a1208;
+  --nr-surface: #241a0c;
+  --nr-text:    #eddfc0;
+  --nr-muted:   #7a6040;
+  --nr-accent:  #f5a623;
+  --nr-border:  rgba(245,166,35,0.09);
+  --nr-shadow:  rgba(0,0,0,0.65);
+}
 
 /* ── Header ── */
 #nr-header {

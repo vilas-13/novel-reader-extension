@@ -175,9 +175,15 @@ function openReader(data: ChapterData): void {
       </label>
       <label>Theme
         <select id="nr-theme">
-          <option value="dark" ${settings.theme === 'dark' ? 'selected' : ''}>Dark</option>
-          <option value="light" ${settings.theme === 'light' ? 'selected' : ''}>Light</option>
-          <option value="sepia" ${settings.theme === 'sepia' ? 'selected' : ''}>Sepia</option>
+          <option value="dark"     ${settings.theme === 'dark'     ? 'selected' : ''}>Dark</option>
+          <option value="amoled"   ${settings.theme === 'amoled'   ? 'selected' : ''}>AMOLED</option>
+          <option value="midnight" ${settings.theme === 'midnight' ? 'selected' : ''}>Midnight</option>
+          <option value="forest"   ${settings.theme === 'forest'   ? 'selected' : ''}>Forest</option>
+          <option value="ocean"    ${settings.theme === 'ocean'    ? 'selected' : ''}>Ocean</option>
+          <option value="rose"     ${settings.theme === 'rose'     ? 'selected' : ''}>Rose</option>
+          <option value="dusk"     ${settings.theme === 'dusk'     ? 'selected' : ''}>Dusk</option>
+          <option value="sepia"    ${settings.theme === 'sepia'    ? 'selected' : ''}>Sepia</option>
+          <option value="light"    ${settings.theme === 'light'    ? 'selected' : ''}>Light</option>
         </select>
       </label>
     </div>
@@ -198,6 +204,9 @@ function openReader(data: ChapterData): void {
 
   document.body.appendChild(overlay)
   document.body.style.overflow = 'hidden'
+
+  // Enter browser fullscreen automatically
+  document.documentElement.requestFullscreen().catch(() => { /* ignore if denied */ })
 
   wireOverlay()
   applySettings()
@@ -312,6 +321,7 @@ function closeReader(): void {
   overlay = null
   document.body.style.overflow = ''
   document.removeEventListener('keydown', onEscape)
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
 }
 
 function onEscape(e: KeyboardEvent): void {
