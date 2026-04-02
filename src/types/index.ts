@@ -1,31 +1,38 @@
-// Shared types for the Novel Reader Chrome Extension
+// Shared types for Novel Book Reader
 
-export interface Message<T = unknown> {
-  type: string
-  payload?: T
-}
-
-export interface NovelChapter {
+export interface ChapterData {
+  type: 'chapter'
+  bookTitle: string
   title: string
-  url: string
   content: string
+  prevUrl: string
+  nextUrl: string
 }
 
-export interface NovelMeta {
+export interface BookData {
+  type: 'book'
   title: string
   author: string
-  coverUrl: string
-  chapters: NovelChapter[]
+  cover: string
+  description: string
+  genres: string[]
+  firstChapterUrl: string
 }
 
-export interface StorageSchema {
-  bookmarks: string[]
-  settings: ReaderSettings
+export type PageData = ChapterData | BookData
+
+export type MessageType = 'OPEN_READER' | 'GET_PAGE_INFO'
+
+export interface PageInfoResponse {
+  pageType: 'chapter' | 'book' | 'other'
+  title?: string
+  bookTitle?: string
+  author?: string
 }
 
 export interface ReaderSettings {
   fontSize: number
-  fontFamily: string
-  theme: 'light' | 'dark' | 'sepia'
   lineHeight: number
+  fontFamily: 'serif' | 'sans-serif'
+  theme: 'dark' | 'light' | 'sepia'
 }
