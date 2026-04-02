@@ -37,34 +37,48 @@ function qs<T extends Element>(sel: string, root: ParentNode = document): T | nu
   return root.querySelector<T>(sel)
 }
 
-function scrapeChapter(): ChapterData {
-  // Chapter title
+function scrapeChapterFromDoc(doc: Document, url: string): ChapterData {
+  const qd = <T extends Element>(sel: string) => doc.querySelector<T>(sel)
+
   const title =
-    qs('.chr-text h2')?.textContent?.trim() ||
-    qs('#chr-head h2')?.textContent?.trim() ||
-    qs('.chr-c h2')?.textContent?.trim() ||
-    Array.from(document.querySelectorAll('h2'))
+    qd('.chr-text h2')?.textContent?.trim() ||
+    qd('#chr-head h2')?.textContent?.trim() ||
+    qd('.chr-c h2')?.textContent?.trim() ||
+    Array.from(doc.querySelectorAll('h2'))
       .find(h => !/next|prev/i.test(h.textContent ?? ''))
       ?.textContent?.trim() ||
     'Chapter'
 
-  // Book title from breadcrumb
   const bookTitle =
-    qs('.breadcrumb li:nth-child(2) a')?.textContent?.trim() ||
-    qs('.chr-text .bread a')?.textContent?.trim() ||
-    qs('a[href*="/b/"]')?.textContent?.trim() ||
-    document.title.split(' – ')[0].split(' - ')[0].trim()
+    qd('.breadcrumb li:nth-child(2) a')?.textContent?.trim() ||
+    qd('.chr-text .bread a')?.textContent?.trim() ||
+    qd<HTMLAnchorElement>('a[href*="/b/"]')?.textContent?.trim() ||
+    doc.title.split(' – ')[0].split(' - ')[0].trim()
 
-  // Content
-  const contentEl = qs('#chr-content') || qs('.chr-c') || qs('.reading-content')
+  const contentEl = qd('#chr-content') || qd('.chr-c') || qd('.reading-content')
   const content = contentEl?.innerHTML ?? '<p>Could not extract chapter content.</p>'
 
-  // Prev / Next navigation
-  const navLinks = Array.from(document.querySelectorAll<HTMLAnchorElement>('.chr-nav a, .nav-buttons a'))
-  const prevUrl = navLinks.find(a => /prev/i.test(a.textContent ?? ''))?.href ?? ''
-  const nextUrl = navLinks.find(a => /next/i.test(a.textContent ?? ''))?.href ?? ''
+  // Resolve relative hrefs against the chapter's own URL
+  const base = new URL(url)
+  const navLinks = Array.from(doc.querySelectorAll<HTMLAnchorElement>('.chr-nav a, .nav-buttons a'))
+  const resolve = (a: HTMLAnchorElement) => a.getAttribute('href')
+    ? new URL(a.getAttribute('href')!, base).href
+    : ''
+  const prevUrl = resolve(navLinks.find(a => /prev/i.test(a.textContent ?? '')) ?? document.createElement('a'))
+  const nextUrl = resolve(navLinks.find(a => /next/i.test(a.textContent ?? '')) ?? document.createElement('a'))
 
   return { type: 'chapter', title, bookTitle, content, prevUrl, nextUrl }
+}
+
+function scrapeChapter(): ChapterData {
+  return scrapeChapterFromDoc(document, window.location.href)
+}
+
+async function fetchChapter(url: string): Promise<ChapterData> {
+  const res = await fetch(url, { credentials: 'omit' })
+  const html = await res.text()
+  const doc = new DOMParser().parseFromString(html, 'text/html')
+  return scrapeChapterFromDoc(doc, url)
 }
 
 function scrapeBook(): BookData {
@@ -131,12 +145,15 @@ function sanitize(html: string): string {
 
 let overlay: HTMLDivElement | null = null
 
+// Persisted settings across chapter navigations
+const settings = { fontSize: 18, lineHeight: 185, sansSerif: false, theme: 'dark' }
+
 function openReader(data: ChapterData): void {
   if (overlay) overlay.remove()
 
   overlay = document.createElement('div')
   overlay.id = 'nr-overlay'
-  overlay.setAttribute('data-theme', 'dark')
+  overlay.setAttribute('data-theme', settings.theme)
   overlay.innerHTML = `
     <div id="nr-header">
       <span id="nr-book-title">${escHtml(data.bookTitle)}</span>
@@ -149,18 +166,18 @@ function openReader(data: ChapterData): void {
 
     <div id="nr-settings-panel" hidden>
       <label>Size
-        <input id="nr-font-size" type="range" min="14" max="28" value="18" />
-        <span id="nr-font-size-val">18px</span>
+        <input id="nr-font-size" type="range" min="14" max="28" value="${settings.fontSize}" />
+        <span id="nr-font-size-val">${settings.fontSize}px</span>
       </label>
       <label>Spacing
-        <input id="nr-line-height" type="range" min="140" max="230" value="185" />
-        <span id="nr-line-height-val">1.85</span>
+        <input id="nr-line-height" type="range" min="140" max="230" value="${settings.lineHeight}" />
+        <span id="nr-line-height-val">${(settings.lineHeight / 100).toFixed(2)}</span>
       </label>
       <label>Theme
         <select id="nr-theme">
-          <option value="dark" selected>Dark</option>
-          <option value="light">Light</option>
-          <option value="sepia">Sepia</option>
+          <option value="dark" ${settings.theme === 'dark' ? 'selected' : ''}>Dark</option>
+          <option value="light" ${settings.theme === 'light' ? 'selected' : ''}>Light</option>
+          <option value="sepia" ${settings.theme === 'sepia' ? 'selected' : ''}>Sepia</option>
         </select>
       </label>
     </div>
@@ -173,16 +190,54 @@ function openReader(data: ChapterData): void {
     </div>
 
     <div id="nr-footer">
-      <a id="nr-prev" href="${data.prevUrl || '#'}" ${!data.prevUrl ? 'class="nr-disabled"' : ''}>← Prev</a>
+      <button id="nr-prev" ${!data.prevUrl ? 'disabled' : ''} data-url="${data.prevUrl}">← Prev</button>
       <span id="nr-progress">0%</span>
-      <a id="nr-next" href="${data.nextUrl || '#'}" ${!data.nextUrl ? 'class="nr-disabled"' : ''}>Next →</a>
+      <button id="nr-next" ${!data.nextUrl ? 'disabled' : ''} data-url="${data.nextUrl}">Next →</button>
     </div>
   `
 
   document.body.appendChild(overlay)
   document.body.style.overflow = 'hidden'
 
-  // Wire up controls
+  wireOverlay()
+  applySettings()
+}
+
+function updateChapterContent(data: ChapterData): void {
+  if (!overlay) return
+  const body = overlay.querySelector('#nr-body') as HTMLElement
+
+  ;(overlay.querySelector('#nr-chapter-title') as HTMLElement).textContent = data.title
+  ;(overlay.querySelector('#nr-book-title') as HTMLElement).textContent = data.bookTitle
+  ;(overlay.querySelector('#nr-content') as HTMLElement).innerHTML = sanitize(data.content)
+
+  const prevBtn = overlay.querySelector('#nr-prev') as HTMLButtonElement
+  const nextBtn = overlay.querySelector('#nr-next') as HTMLButtonElement
+  prevBtn.disabled = !data.prevUrl
+  prevBtn.dataset.url = data.prevUrl
+  prevBtn.textContent = '← Prev'
+  nextBtn.disabled = !data.nextUrl
+  nextBtn.dataset.url = data.nextUrl
+  nextBtn.textContent = 'Next →'
+
+  // Reset scroll + progress
+  body.scrollTop = 0
+  ;(overlay.querySelector('#nr-progress') as HTMLElement).textContent = '0%'
+}
+
+function applySettings(): void {
+  if (!overlay) return
+  const contentEl = overlay.querySelector('#nr-content') as HTMLElement
+  contentEl.style.fontSize = settings.fontSize + 'px'
+  contentEl.style.lineHeight = (settings.lineHeight / 100).toFixed(2)
+  contentEl.style.fontFamily = settings.sansSerif
+    ? "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+    : "Georgia, 'Times New Roman', serif"
+}
+
+function wireOverlay(): void {
+  if (!overlay) return
+
   overlay.querySelector('#nr-close-btn')!.addEventListener('click', closeReader)
   document.addEventListener('keydown', onEscape)
 
@@ -191,45 +246,64 @@ function openReader(data: ChapterData): void {
     panel.hidden = !panel.hidden
   })
 
-  // Font family toggle (Serif ↔ Sans-serif)
-  const contentEl = overlay.querySelector('#nr-content') as HTMLElement
-  let sansSerif = false
   overlay.querySelector('#nr-font-toggle')!.addEventListener('click', () => {
-    sansSerif = !sansSerif
-    contentEl.style.fontFamily = sansSerif
-      ? "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
-      : "Georgia, 'Times New Roman', serif"
+    settings.sansSerif = !settings.sansSerif
+    applySettings()
   })
 
-  // Font size
   const fontInput = overlay.querySelector('#nr-font-size') as HTMLInputElement
   const fontVal   = overlay.querySelector('#nr-font-size-val') as HTMLElement
   fontInput.addEventListener('input', () => {
-    contentEl.style.fontSize = fontInput.value + 'px'
+    settings.fontSize = Number(fontInput.value)
     fontVal.textContent = fontInput.value + 'px'
+    applySettings()
   })
 
-  // Line height
   const lhInput = overlay.querySelector('#nr-line-height') as HTMLInputElement
   const lhVal   = overlay.querySelector('#nr-line-height-val') as HTMLElement
   lhInput.addEventListener('input', () => {
-    const v = (parseInt(lhInput.value) / 100).toFixed(2)
-    contentEl.style.lineHeight = v
-    lhVal.textContent = v
+    settings.lineHeight = Number(lhInput.value)
+    lhVal.textContent = (settings.lineHeight / 100).toFixed(2)
+    applySettings()
   })
 
-  // Theme
   const themeSelect = overlay.querySelector('#nr-theme') as HTMLSelectElement
   themeSelect.addEventListener('change', () => {
-    overlay!.setAttribute('data-theme', themeSelect.value)
+    settings.theme = themeSelect.value
+    overlay!.setAttribute('data-theme', settings.theme)
   })
 
   // Scroll progress
-  const body  = overlay.querySelector('#nr-body') as HTMLElement
+  const body   = overlay.querySelector('#nr-body') as HTMLElement
   const progEl = overlay.querySelector('#nr-progress') as HTMLElement
   body.addEventListener('scroll', () => {
     const max = body.scrollHeight - body.clientHeight
     progEl.textContent = max > 0 ? Math.round((body.scrollTop / max) * 100) + '%' : '100%'
+  })
+
+  // In-place chapter navigation — no page reload
+  async function navigate(btn: HTMLButtonElement): Promise<void> {
+    const url = btn.dataset.url
+    if (!url) return
+    btn.disabled = true
+    btn.textContent = btn.id === 'nr-next' ? 'Loading…' : '…'
+    try {
+      const data = await fetchChapter(url)
+      updateChapterContent(data)
+      const trigger = document.getElementById('nr-trigger') as HTMLButtonElement | null
+      if (trigger) trigger.onclick = () => openReader(data)
+    } catch {
+      // Restore button on error so user can retry
+      btn.disabled = false
+      btn.textContent = btn.id === 'nr-next' ? 'Next →' : '← Prev'
+    }
+  }
+
+  overlay.querySelector('#nr-prev')!.addEventListener('click', (e) => {
+    navigate(e.currentTarget as HTMLButtonElement)
+  })
+  overlay.querySelector('#nr-next')!.addEventListener('click', (e) => {
+    navigate(e.currentTarget as HTMLButtonElement)
   })
 }
 

@@ -224,22 +224,30 @@
   border-top: 1px solid var(--nr-border);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
-#nr-footer a {
+#nr-footer a,
+#nr-footer button {
   color: var(--nr-accent);
   text-decoration: none;
   font-weight: 600;
   font-size: 13px;
   padding: 7px 14px;
   border-radius: 8px;
-  transition: background 0.15s;
+  transition: background 0.15s, opacity 0.15s;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
-#nr-footer a:hover:not(.nr-disabled) {
+#nr-footer a:hover:not(:disabled),
+#nr-footer button:hover:not(:disabled) {
   background: var(--nr-border);
 }
-#nr-footer a.nr-disabled {
+#nr-footer a.nr-disabled,
+#nr-footer button:disabled {
   color: var(--nr-muted);
   pointer-events: none;
   opacity: 0.35;
+  cursor: default;
 }
 #nr-progress {
   font-size: 12px;
