@@ -1,33 +1,23 @@
 {
   "manifest_version": 3,
-  "name": "Novel Reader Extension",
-  "description": "A Chrome extension for reading novels from NovelBin and similar sites.",
-  "version": "1.0.0",
-  "permissions": ["activeTab", "storage", "scripting"],
-  "host_permissions": ["<all_urls>"],
+  "name": "Novel Book Reader",
+  "version": "1.0",
+  "description": "Turn web novels into book-like reading experience",
+  "permissions": ["activeTab", "tabs", "scripting", "storage"],
+  "host_permissions": ["*://*.novelbin.com/*"],
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
-  "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
-      "css": ["content.css"]
-    }
-  ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Novel Reader",
-    "default_icon": {
-      "16": "icons/icon16.png",
-      "48": "icons/icon48.png",
-      "128": "icons/icon128.png"
-    }
+    "default_title": "Novel Book Reader"
   },
-  "icons": {
-    "16": "icons/icon16.png",
-    "48": "icons/icon48.png",
-    "128": "icons/icon128.png"
-  }
+  "content_scripts": [
+    {
+      "matches": ["*://*.novelbin.com/*"],
+      "js": ["content.js"],
+      "css": ["styles.css"]
+    }
+  ]
 }
