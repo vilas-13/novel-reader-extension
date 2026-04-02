@@ -1,73 +1,86 @@
-# React + TypeScript + Vite
+# Novel Book Reader
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A Chrome extension that transforms [NovelBin](https://novelbin.com) into a distraction-free, book-like reading experience — similar to dedicated e-reader apps.
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Features
 
-## React Compiler
+- **Immersive reader overlay** — full-screen reader that hides the original page
+- **In-place chapter navigation** — Prev/Next loads chapters via `fetch()` without page reloads or losing your place
+- **9 themes** — Dark, AMOLED, Midnight, Forest, Ocean, Rose, Dusk, Sepia, Light
+- **Font controls** — size slider (14–28 px), line-spacing slider, serif/sans-serif toggle
+- **Reading progress** — scroll percentage shown in the footer
+- **Book info banner** — cover, author, genres, and description shown on book pages
+- **Floating trigger button** — appears on every chapter page for one-click reader launch
+- **Keyboard shortcut** — `Esc` closes the reader
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+---
 
-## Expanding the ESLint configuration
+## Installation
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+> The extension is not published to the Chrome Web Store yet. Load it manually as an unpacked extension.
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+1. Clone or download this repository
+2. Install dependencies and build:
+   ```bash
+   npm install
+   npm run build
+   ```
+3. Open Chrome and go to `chrome://extensions`
+4. Enable **Developer mode** (top-right toggle)
+5. Click **Load unpacked** and select the `dist/` folder
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+---
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Development
+
+```bash
+npm install       # install dependencies
+npm run dev       # start Vite dev server (popup UI only)
+npm run build     # production build → dist/
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+After every `npm run build`, go to `chrome://extensions` and click the **reload** icon on the extension to pick up changes.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+### Project structure
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
 ```
+public/
+  manifest.json       # Chrome Extension Manifest v3
+  styles.css          # Reader overlay styles (injected into pages)
+  icons/              # Extension icons (16, 48, 128 px)
+src/
+  popup/              # React popup UI
+    main.tsx
+    App.tsx
+    App.css
+  background/
+    index.ts          # Service worker
+  content/
+    index.ts          # Page scraper + reader overlay
+  types/
+    index.ts          # Shared TypeScript types
+popup.html            # Popup entry point
+vite.config.ts        # Multi-entry build config
+```
+
+---
+
+## How it works
+
+| Page | Behaviour |
+|------|-----------|
+| `novelbin.com/b/<novel>/chapter-<n>` | Injects a **📖 Open Reader** floating button |
+| `novelbin.com/b/<novel>` | Shows a **book info banner** with cover, genres & description |
+| Extension popup | Displays current book/chapter and an **Open Reader** button |
+
+---
+
+## Tech stack
+
+- [React 19](https://react.dev) + TypeScript — popup UI
+- [Vite 8](https://vite.dev) — build tool with multi-entry rollup config
+- Vanilla TypeScript — content script (no framework, keeps bundle small)
+- Chrome Extension Manifest v3
+
