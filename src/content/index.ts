@@ -97,10 +97,15 @@ function scrapeBook(): BookData {
     }
   })
 
+  const coverImg =
+    qs<HTMLImageElement>('.book img') ||
+    qs<HTMLImageElement>('.col-info-desc img') ||
+    qs<HTMLImageElement>('.info-cover img')
   const cover =
-    (qs<HTMLImageElement>('.book img'))?.src ||
-    (qs<HTMLImageElement>('.col-info-desc img'))?.src ||
-    (qs<HTMLImageElement>('.info-cover img'))?.src ||
+    coverImg?.getAttribute('data-src') ||
+    coverImg?.getAttribute('data-lazy-src') ||
+    coverImg?.getAttribute('data-original') ||
+    (coverImg?.src && !coverImg.src.includes('placeholder') && !coverImg.src.includes('data:') ? coverImg.src : '') ||
     ''
 
   const description =
@@ -341,9 +346,9 @@ function injectBookBanner(data: BookData): void {
     .map(g => `<span class="nr-genre-tag">${escHtml(g)}</span>`)
     .join('')
 
-  const descPreview = data.description.length > 480
-    ? data.description.slice(0, 480) + '…'
-    : data.description
+  const PREVIEW_LEN = 480
+  const isLong = data.description.length > PREVIEW_LEN
+  const descPreview = isLong ? data.description.slice(0, PREVIEW_LEN) + '…' : data.description
 
   banner.innerHTML = `
     <div id="nr-banner-inner">
@@ -353,13 +358,27 @@ function injectBookBanner(data: BookData): void {
         <h2>${escHtml(data.title)}</h2>
         ${data.author ? `<p class="nr-author">by ${escHtml(data.author)}</p>` : ''}
         ${genreHtml ? `<div class="nr-genres">${genreHtml}</div>` : ''}
-        <p class="nr-desc">${escHtml(descPreview)}</p>
+        <p class="nr-desc" id="nr-desc-text">${escHtml(descPreview)}</p>
+        ${isLong ? `<button class="nr-desc-toggle" id="nr-desc-toggle">Show more ▾</button>` : ''}
         <a class="nr-read-btn" href="${data.firstChapterUrl}">Start Reading →</a>
       </div>
     </div>
   `
 
   banner.querySelector('#nr-banner-close')!.addEventListener('click', () => banner.remove())
+
+  // Show more / Show less toggle
+  const toggleBtn = banner.querySelector('#nr-desc-toggle') as HTMLButtonElement | null
+  const descEl = banner.querySelector('#nr-desc-text') as HTMLElement | null
+  if (toggleBtn && descEl) {
+    let expanded = false
+    toggleBtn.addEventListener('click', () => {
+      expanded = !expanded
+      descEl.textContent = expanded ? data.description : descPreview
+      descEl.classList.toggle('nr-desc-expanded', expanded)
+      toggleBtn.textContent = expanded ? 'Show less ▴' : 'Show more ▾'
+    })
+  }
   // Click backdrop to dismiss
   banner.addEventListener('click', (e) => { if (e.target === banner) banner.remove() })
 
