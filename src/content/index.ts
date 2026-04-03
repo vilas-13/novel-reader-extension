@@ -149,6 +149,7 @@ function sanitize(html: string): string {
 // ── Reader overlay ──────────────────────────────────────────────────────────
 
 let overlay: HTMLDivElement | null = null
+let chromeHideTimer: number | null = null
 
 // Persisted settings across chapter navigations
 const settings = { fontSize: 18, lineHeight: 185, sansSerif: false, theme: 'dark' }
@@ -256,8 +257,48 @@ function wireOverlay(): void {
   document.addEventListener('keydown', onEscape)
 
   const panel = overlay.querySelector('#nr-settings-panel') as HTMLElement
+  const EDGE_REVEAL_ZONE_PX = 56
+  const CHROME_HIDE_DELAY_MS = 180
+
+  const clearChromeHideTimer = (): void => {
+    if (chromeHideTimer !== null) {
+      window.clearTimeout(chromeHideTimer)
+      chromeHideTimer = null
+    }
+  }
+
+  const setChromeVisibility = ({ showHeader = false, showFooter = false }: { showHeader?: boolean, showFooter?: boolean } = {}): void => {
+    overlay!.classList.toggle('nr-show-header', showHeader || !panel.hidden)
+    overlay!.classList.toggle('nr-show-footer', showFooter)
+    overlay!.classList.toggle('nr-settings-open', !panel.hidden)
+  }
+
+  const scheduleChromeHide = (): void => {
+    clearChromeHideTimer()
+    chromeHideTimer = window.setTimeout(() => {
+      setChromeVisibility({ showHeader: false, showFooter: false })
+    }, CHROME_HIDE_DELAY_MS)
+  }
+
+  const syncChromeToPointer = (clientY: number): void => {
+    const nearTop = clientY <= EDGE_REVEAL_ZONE_PX
+    const nearBottom = window.innerHeight - clientY <= EDGE_REVEAL_ZONE_PX
+
+    setChromeVisibility({
+      showHeader: nearTop,
+      showFooter: nearBottom,
+    })
+
+    if (!nearTop && !nearBottom && panel.hidden) {
+      scheduleChromeHide()
+    }
+  }
+
   overlay.querySelector('#nr-settings-btn')!.addEventListener('click', () => {
     panel.hidden = !panel.hidden
+    clearChromeHideTimer()
+    setChromeVisibility({ showHeader: true, showFooter: false })
+    if (panel.hidden) scheduleChromeHide()
   })
 
   overlay.querySelector('#nr-font-toggle')!.addEventListener('click', () => {
@@ -285,6 +326,30 @@ function wireOverlay(): void {
   themeSelect.addEventListener('change', () => {
     settings.theme = themeSelect.value
     overlay!.setAttribute('data-theme', settings.theme)
+  })
+
+  overlay.addEventListener('mousemove', (event) => {
+    clearChromeHideTimer()
+    syncChromeToPointer(event.clientY)
+  })
+
+  overlay.addEventListener('mouseleave', () => {
+    clearChromeHideTimer()
+    setChromeVisibility({ showHeader: false, showFooter: false })
+  })
+
+  overlay.addEventListener('focusin', (event) => {
+    const target = event.target as HTMLElement | null
+    if (!target) return
+
+    setChromeVisibility({
+      showHeader: Boolean(target.closest('#nr-header, #nr-settings-panel')),
+      showFooter: Boolean(target.closest('#nr-footer')),
+    })
+  })
+
+  overlay.addEventListener('focusout', () => {
+    if (panel.hidden) scheduleChromeHide()
   })
 
   // Scroll progress
@@ -319,9 +384,15 @@ function wireOverlay(): void {
   overlay.querySelector('#nr-next')!.addEventListener('click', (e) => {
     navigate(e.currentTarget as HTMLButtonElement)
   })
+
+  setChromeVisibility()
 }
 
 function closeReader(): void {
+  if (chromeHideTimer !== null) {
+    window.clearTimeout(chromeHideTimer)
+    chromeHideTimer = null
+  }
   overlay?.remove()
   overlay = null
   document.body.style.overflow = ''

@@ -8,6 +8,7 @@ A Chrome extension that transforms [NovelBin](https://novelbin.com) into a distr
 
 - **Immersive reader overlay** — full-screen reader that hides the original page
 - **In-place chapter navigation** — Prev/Next loads chapters via `fetch()` without page reloads or losing your place
+- **Edge-reveal controls** — chapter text fills the screen, while the header/footer slide in only when you hover the top or bottom edge
 - **9 themes** — Dark, AMOLED, Midnight, Forest, Ocean, Rose, Dusk, Sepia, Light
 - **Font controls** — size slider (14–28 px), line-spacing slider, serif/sans-serif toggle
 - **Reading progress** — scroll percentage shown in the footer
