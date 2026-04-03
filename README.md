@@ -14,7 +14,7 @@ A Chrome extension that transforms [NovelBin](https://novelbin.com) into a distr
 - **Reading progress** — scroll percentage shown in the footer
 - **Book info banner** — cover, author, genres, and description shown on book pages
 - **Floating trigger button** — appears on every chapter page for one-click reader launch
-- **Keyboard shortcut** — `Esc` closes the reader
+- **Keyboard shortcuts** — `Esc` closes the reader, `←` goes to the previous chapter, `→` goes to the next chapter
 
 ---
 

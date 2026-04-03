@@ -75,11 +75,37 @@ function scrapeChapter(): ChapterData {
 }
 
 async function fetchChapter(url: string): Promise<ChapterData> {
-  const res = await fetch(url, { credentials: 'omit' })
-  const html = await res.text()
-  const doc = new DOMParser().parseFromString(html, 'text/html')
-  return scrapeChapterFromDoc(doc, url)
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      { type: 'FETCH_CHAPTER', url },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(`Extension error: ${chrome.runtime.lastError.message}`))
+          return
+        }
+
+        if (response?.status === 'error') {
+          reject(new Error(`Failed to fetch chapter: ${response.error}`))
+          return
+        }
+
+        if (!response?.html) {
+          reject(new Error('No HTML response from background script'))
+          return
+        }
+
+        try {
+          const doc = new DOMParser().parseFromString(response.html, 'text/html')
+          const data = scrapeChapterFromDoc(doc, url)
+          resolve(data)
+        } catch (err) {
+          reject(new Error(`Failed to parse chapter: ${err instanceof Error ? err.message : String(err)}`))
+        }
+      }
+    )
+  })
 }
+
 
 function scrapeBook(): BookData {
   const title =
@@ -150,6 +176,7 @@ function sanitize(html: string): string {
 
 let overlay: HTMLDivElement | null = null
 let chromeHideTimer: number | null = null
+let isNavigating = false
 
 // Persisted settings across chapter navigations
 const settings = { fontSize: 18, lineHeight: 185, sansSerif: false, theme: 'dark' }
@@ -211,9 +238,6 @@ function openReader(data: ChapterData): void {
   document.body.appendChild(overlay)
   document.body.style.overflow = 'hidden'
 
-  // Enter browser fullscreen automatically
-  document.documentElement.requestFullscreen().catch(() => { /* ignore if denied */ })
-
   wireOverlay()
   applySettings()
 }
@@ -254,7 +278,8 @@ function wireOverlay(): void {
   if (!overlay) return
 
   overlay.querySelector('#nr-close-btn')!.addEventListener('click', closeReader)
-  document.addEventListener('keydown', onEscape)
+  // capture: true ensures we intercept BEFORE the page's own handlers (e.g. NovelBin keyboard nav)
+  document.addEventListener('keydown', onReaderKeydown, { capture: true })
 
   const panel = overlay.querySelector('#nr-settings-panel') as HTMLElement
   const EDGE_REVEAL_ZONE_PX = 56
@@ -363,25 +388,35 @@ function wireOverlay(): void {
   // In-place chapter navigation — no page reload
   async function navigate(btn: HTMLButtonElement): Promise<void> {
     const url = btn.dataset.url
-    if (!url) return
+    if (!url || isNavigating) return
+    
+    isNavigating = true
     btn.disabled = true
     btn.textContent = btn.id === 'nr-next' ? 'Loading…' : '…'
+    
     try {
       const data = await fetchChapter(url)
       updateChapterContent(data)
       const trigger = document.getElementById('nr-trigger') as HTMLButtonElement | null
       if (trigger) trigger.onclick = () => openReader(data)
-    } catch {
+    } catch (err) {
+      console.error('Failed to fetch chapter:', err)
       // Restore button on error so user can retry
       btn.disabled = false
       btn.textContent = btn.id === 'nr-next' ? 'Next →' : '← Prev'
+    } finally {
+      isNavigating = false
     }
   }
 
   overlay.querySelector('#nr-prev')!.addEventListener('click', (e) => {
+    e.preventDefault()
+    e.stopPropagation()
     navigate(e.currentTarget as HTMLButtonElement)
   })
   overlay.querySelector('#nr-next')!.addEventListener('click', (e) => {
+    e.preventDefault()
+    e.stopPropagation()
     navigate(e.currentTarget as HTMLButtonElement)
   })
 
@@ -396,12 +431,40 @@ function closeReader(): void {
   overlay?.remove()
   overlay = null
   document.body.style.overflow = ''
-  document.removeEventListener('keydown', onEscape)
-  if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
+  document.removeEventListener('keydown', onReaderKeydown, { capture: true })
 }
 
-function onEscape(e: KeyboardEvent): void {
-  if (e.key === 'Escape') closeReader()
+function onReaderKeydown(e: KeyboardEvent): void {
+  // Always stop the page's own handlers from seeing this event
+  e.stopImmediatePropagation()
+
+  if (e.key === 'Escape') {
+    closeReader()
+    return
+  }
+
+  const target = e.target as HTMLElement | null
+  const tagName = target?.tagName
+  const isEditable = Boolean(
+    target?.isContentEditable ||
+    tagName === 'INPUT' ||
+    tagName === 'TEXTAREA' ||
+    tagName === 'SELECT'
+  )
+
+  if (isEditable) return
+
+  if (e.key === 'ArrowLeft') {
+    e.preventDefault()
+    const prevBtn = overlay?.querySelector('#nr-prev') as HTMLButtonElement | null
+    if (prevBtn && !prevBtn.disabled) prevBtn.click()
+  }
+
+  if (e.key === 'ArrowRight') {
+    e.preventDefault()
+    const nextBtn = overlay?.querySelector('#nr-next') as HTMLButtonElement | null
+    if (nextBtn && !nextBtn.disabled) nextBtn.click()
+  }
 }
 
 // ── Book info banner ─────────────────────────────────────────────────────────
