@@ -75,11 +75,37 @@ function scrapeChapter(): ChapterData {
 }
 
 async function fetchChapter(url: string): Promise<ChapterData> {
-  const res = await fetch(url, { credentials: 'omit' })
-  const html = await res.text()
-  const doc = new DOMParser().parseFromString(html, 'text/html')
-  return scrapeChapterFromDoc(doc, url)
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      { type: 'FETCH_CHAPTER', url },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(`Extension error: ${chrome.runtime.lastError.message}`))
+          return
+        }
+
+        if (response?.status === 'error') {
+          reject(new Error(`Failed to fetch chapter: ${response.error}`))
+          return
+        }
+
+        if (!response?.html) {
+          reject(new Error('No HTML response from background script'))
+          return
+        }
+
+        try {
+          const doc = new DOMParser().parseFromString(response.html, 'text/html')
+          const data = scrapeChapterFromDoc(doc, url)
+          resolve(data)
+        } catch (err) {
+          reject(new Error(`Failed to parse chapter: ${err instanceof Error ? err.message : String(err)}`))
+        }
+      }
+    )
+  })
 }
+
 
 function scrapeBook(): BookData {
   const title =
@@ -97,10 +123,15 @@ function scrapeBook(): BookData {
     }
   })
 
+  const coverImg =
+    qs<HTMLImageElement>('.book img') ||
+    qs<HTMLImageElement>('.col-info-desc img') ||
+    qs<HTMLImageElement>('.info-cover img')
   const cover =
-    (qs<HTMLImageElement>('.book img'))?.src ||
-    (qs<HTMLImageElement>('.col-info-desc img'))?.src ||
-    (qs<HTMLImageElement>('.info-cover img'))?.src ||
+    coverImg?.getAttribute('data-src') ||
+    coverImg?.getAttribute('data-lazy-src') ||
+    coverImg?.getAttribute('data-original') ||
+    (coverImg?.src && !coverImg.src.includes('placeholder') && !coverImg.src.includes('data:') ? coverImg.src : '') ||
     ''
 
   const description =
@@ -144,6 +175,8 @@ function sanitize(html: string): string {
 // ── Reader overlay ──────────────────────────────────────────────────────────
 
 let overlay: HTMLDivElement | null = null
+let chromeHideTimer: number | null = null
+let isNavigating = false
 
 // Persisted settings across chapter navigations
 const settings = { fontSize: 18, lineHeight: 185, sansSerif: false, theme: 'dark' }
@@ -205,9 +238,6 @@ function openReader(data: ChapterData): void {
   document.body.appendChild(overlay)
   document.body.style.overflow = 'hidden'
 
-  // Enter browser fullscreen automatically
-  document.documentElement.requestFullscreen().catch(() => { /* ignore if denied */ })
-
   wireOverlay()
   applySettings()
 }
@@ -248,11 +278,52 @@ function wireOverlay(): void {
   if (!overlay) return
 
   overlay.querySelector('#nr-close-btn')!.addEventListener('click', closeReader)
-  document.addEventListener('keydown', onEscape)
+  // capture: true ensures we intercept BEFORE the page's own handlers (e.g. NovelBin keyboard nav)
+  document.addEventListener('keydown', onReaderKeydown, { capture: true })
 
   const panel = overlay.querySelector('#nr-settings-panel') as HTMLElement
+  const EDGE_REVEAL_ZONE_PX = 56
+  const CHROME_HIDE_DELAY_MS = 180
+
+  const clearChromeHideTimer = (): void => {
+    if (chromeHideTimer !== null) {
+      window.clearTimeout(chromeHideTimer)
+      chromeHideTimer = null
+    }
+  }
+
+  const setChromeVisibility = ({ showHeader = false, showFooter = false }: { showHeader?: boolean, showFooter?: boolean } = {}): void => {
+    overlay!.classList.toggle('nr-show-header', showHeader || !panel.hidden)
+    overlay!.classList.toggle('nr-show-footer', showFooter)
+    overlay!.classList.toggle('nr-settings-open', !panel.hidden)
+  }
+
+  const scheduleChromeHide = (): void => {
+    clearChromeHideTimer()
+    chromeHideTimer = window.setTimeout(() => {
+      setChromeVisibility({ showHeader: false, showFooter: false })
+    }, CHROME_HIDE_DELAY_MS)
+  }
+
+  const syncChromeToPointer = (clientY: number): void => {
+    const nearTop = clientY <= EDGE_REVEAL_ZONE_PX
+    const nearBottom = window.innerHeight - clientY <= EDGE_REVEAL_ZONE_PX
+
+    setChromeVisibility({
+      showHeader: nearTop,
+      showFooter: nearBottom,
+    })
+
+    if (!nearTop && !nearBottom && panel.hidden) {
+      scheduleChromeHide()
+    }
+  }
+
   overlay.querySelector('#nr-settings-btn')!.addEventListener('click', () => {
     panel.hidden = !panel.hidden
+    clearChromeHideTimer()
+    setChromeVisibility({ showHeader: true, showFooter: false })
+    if (panel.hidden) scheduleChromeHide()
   })
 
   overlay.querySelector('#nr-font-toggle')!.addEventListener('click', () => {
@@ -282,6 +353,30 @@ function wireOverlay(): void {
     overlay!.setAttribute('data-theme', settings.theme)
   })
 
+  overlay.addEventListener('mousemove', (event) => {
+    clearChromeHideTimer()
+    syncChromeToPointer(event.clientY)
+  })
+
+  overlay.addEventListener('mouseleave', () => {
+    clearChromeHideTimer()
+    setChromeVisibility({ showHeader: false, showFooter: false })
+  })
+
+  overlay.addEventListener('focusin', (event) => {
+    const target = event.target as HTMLElement | null
+    if (!target) return
+
+    setChromeVisibility({
+      showHeader: Boolean(target.closest('#nr-header, #nr-settings-panel')),
+      showFooter: Boolean(target.closest('#nr-footer')),
+    })
+  })
+
+  overlay.addEventListener('focusout', () => {
+    if (panel.hidden) scheduleChromeHide()
+  })
+
   // Scroll progress
   const body   = overlay.querySelector('#nr-body') as HTMLElement
   const progEl = overlay.querySelector('#nr-progress') as HTMLElement
@@ -293,39 +388,83 @@ function wireOverlay(): void {
   // In-place chapter navigation — no page reload
   async function navigate(btn: HTMLButtonElement): Promise<void> {
     const url = btn.dataset.url
-    if (!url) return
+    if (!url || isNavigating) return
+    
+    isNavigating = true
     btn.disabled = true
     btn.textContent = btn.id === 'nr-next' ? 'Loading…' : '…'
+    
     try {
       const data = await fetchChapter(url)
       updateChapterContent(data)
       const trigger = document.getElementById('nr-trigger') as HTMLButtonElement | null
       if (trigger) trigger.onclick = () => openReader(data)
-    } catch {
+    } catch (err) {
+      console.error('Failed to fetch chapter:', err)
       // Restore button on error so user can retry
       btn.disabled = false
       btn.textContent = btn.id === 'nr-next' ? 'Next →' : '← Prev'
+    } finally {
+      isNavigating = false
     }
   }
 
   overlay.querySelector('#nr-prev')!.addEventListener('click', (e) => {
+    e.preventDefault()
+    e.stopPropagation()
     navigate(e.currentTarget as HTMLButtonElement)
   })
   overlay.querySelector('#nr-next')!.addEventListener('click', (e) => {
+    e.preventDefault()
+    e.stopPropagation()
     navigate(e.currentTarget as HTMLButtonElement)
   })
+
+  setChromeVisibility()
 }
 
 function closeReader(): void {
+  if (chromeHideTimer !== null) {
+    window.clearTimeout(chromeHideTimer)
+    chromeHideTimer = null
+  }
   overlay?.remove()
   overlay = null
   document.body.style.overflow = ''
-  document.removeEventListener('keydown', onEscape)
-  if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
+  document.removeEventListener('keydown', onReaderKeydown, { capture: true })
 }
 
-function onEscape(e: KeyboardEvent): void {
-  if (e.key === 'Escape') closeReader()
+function onReaderKeydown(e: KeyboardEvent): void {
+  // Always stop the page's own handlers from seeing this event
+  e.stopImmediatePropagation()
+
+  if (e.key === 'Escape') {
+    closeReader()
+    return
+  }
+
+  const target = e.target as HTMLElement | null
+  const tagName = target?.tagName
+  const isEditable = Boolean(
+    target?.isContentEditable ||
+    tagName === 'INPUT' ||
+    tagName === 'TEXTAREA' ||
+    tagName === 'SELECT'
+  )
+
+  if (isEditable) return
+
+  if (e.key === 'ArrowLeft') {
+    e.preventDefault()
+    const prevBtn = overlay?.querySelector('#nr-prev') as HTMLButtonElement | null
+    if (prevBtn && !prevBtn.disabled) prevBtn.click()
+  }
+
+  if (e.key === 'ArrowRight') {
+    e.preventDefault()
+    const nextBtn = overlay?.querySelector('#nr-next') as HTMLButtonElement | null
+    if (nextBtn && !nextBtn.disabled) nextBtn.click()
+  }
 }
 
 // ── Book info banner ─────────────────────────────────────────────────────────
@@ -341,9 +480,9 @@ function injectBookBanner(data: BookData): void {
     .map(g => `<span class="nr-genre-tag">${escHtml(g)}</span>`)
     .join('')
 
-  const descPreview = data.description.length > 480
-    ? data.description.slice(0, 480) + '…'
-    : data.description
+  const PREVIEW_LEN = 480
+  const isLong = data.description.length > PREVIEW_LEN
+  const descPreview = isLong ? data.description.slice(0, PREVIEW_LEN) + '…' : data.description
 
   banner.innerHTML = `
     <div id="nr-banner-inner">
@@ -353,13 +492,27 @@ function injectBookBanner(data: BookData): void {
         <h2>${escHtml(data.title)}</h2>
         ${data.author ? `<p class="nr-author">by ${escHtml(data.author)}</p>` : ''}
         ${genreHtml ? `<div class="nr-genres">${genreHtml}</div>` : ''}
-        <p class="nr-desc">${escHtml(descPreview)}</p>
+        <p class="nr-desc" id="nr-desc-text">${escHtml(descPreview)}</p>
+        ${isLong ? `<button class="nr-desc-toggle" id="nr-desc-toggle">Show more ▾</button>` : ''}
         <a class="nr-read-btn" href="${data.firstChapterUrl}">Start Reading →</a>
       </div>
     </div>
   `
 
   banner.querySelector('#nr-banner-close')!.addEventListener('click', () => banner.remove())
+
+  // Show more / Show less toggle
+  const toggleBtn = banner.querySelector('#nr-desc-toggle') as HTMLButtonElement | null
+  const descEl = banner.querySelector('#nr-desc-text') as HTMLElement | null
+  if (toggleBtn && descEl) {
+    let expanded = false
+    toggleBtn.addEventListener('click', () => {
+      expanded = !expanded
+      descEl.textContent = expanded ? data.description : descPreview
+      descEl.classList.toggle('nr-desc-expanded', expanded)
+      toggleBtn.textContent = expanded ? 'Show less ▴' : 'Show more ▾'
+    })
+  }
   // Click backdrop to dismiss
   banner.addEventListener('click', (e) => { if (e.target === banner) banner.remove() })
 
